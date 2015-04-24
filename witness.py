@@ -28,46 +28,98 @@ from __future__ import print_function, with_statement
 import sys
 import ipaddress
 import multiprocessing
+import multiprocessing.pool
+import time
+from contextlib import closing
 
 
-def check_host(currentip, condition):
+class NoDaemonProcess(multiprocessing.Process):
+    def _get_daemon(self):
+        return False
+
+    def _set_daemon(self, value):
+        pass
+    daemon = property(_get_daemon, _set_daemon)
+
+
+class Pool(multiprocessing.pool.Pool):
+    Process = NoDaemonProcess
+
+
+def do_check(nowip, condition):
+    result = False
     import OpenSSL
     import socket
+    import re
     context = OpenSSL.SSL.Context(OpenSSL.SSL.TLSv1_METHOD)
     socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     socket.settimeout(1)
     connection = OpenSSL.SSL.Connection(context, socket)
-    context.set_timeout(1)
-    connection.set_tlsext_host_name(condition["host"].encode())
+    if condition["sni"]:
+        connection.set_tlsext_host_name(condition["host"])
     try:
         connection.connect(
-            (str(currentip), int(condition["port"])))
+            (nowip, condition["port"]))
     except KeyboardInterrupt:
         exit()
     except:
-        return "Error"
+        print(nowip + " Error")
+        return
     connection.setblocking(True)
     try:
         connection.do_handshake()
     except KeyboardInterrupt:
         exit()
     except OpenSSL.SSL.WantReadError:
-        return "Timeout"
+        print(nowip + " Timeout")
+        return
     except:
-        return "Error"
+        print(nowip + " Error")
+        return
     cert = connection.get_peer_certificate()
-    certname = OpenSSL.crypto.X509Name(cert.get_subject())
-    try:
-        connection.shutdown()
-        connection.close()
-    except:
+    data = []
+    for no in range(0, cert.get_extension_count()):
+        if cert.get_extension(no).get_short_name() != b"subjectAltName":
+            continue
+        data = re.sub(
+            r"\\[\s\S]", "#",
+            re.sub(
+                r"\\x[0-9a-zA-Z]{2}", "#",
+                (str(cert.get_extension(no).get_data())
+                    .replace(r"b\"", "").replace("\"", "")
+                    .replace(r"b'", "")
+                    .replace(r"'", "").replace("\\\\", "\\")))).split("#")
+        for item in data:
+            if item != "" and item != "0":
+                if item.find(condition["common_name_has"]) != -1:
+                    print(nowip + " True, DNS Name=" + item)
+                    result = True
+                else:
+                    print(nowip + " False, DNS Name=" + item)
+    if len(data) == 0:
+        certname = OpenSSL.crypto.X509Name(cert.get_subject())
+        if certname.commonName.find(condition["common_name_has"]) != -1:
+            print(nowip + " True, CN=" + certname.commonName)
+            result = True
+        else:
+            print(nowip + " False, CN=" + certname.commonName)
+    return result
+
+
+def check_host(nowip, condition, writefilepath):
+    import multiprocessing
+
+    with multiprocessing.Pool(1) as child_pool:
+        child_process = child_pool.apply_async(
+            do_check, [nowip, condition])
         try:
-            connection.close()
-        except KeyboardInterrupt:
-            exit()
+            result = child_process.get(timeout=3)
         except Exception as e:
-            return "Error"
-    return certname.commonName
+            print(e)
+            print(nowip + " Timeout")
+        if result:
+            with open(writefilepath, "a+") as writefile:
+                writefile.write(nowip + "\n")
 
 
 def main():
@@ -81,38 +133,35 @@ def main():
         for item in target:
             condition[item.split(":")[0]] = item.split(":")[1]
         target = readfile.readline()
+        condition["sni"] = condition.get("sni", "on")
+        if condition["sni"].lower() in ["on", "true", "1"]:
+            condition["sni"] = True
+        else:
+            condition["sni"] = False
+        condition["host"] = condition["host"].encode()
+        condition["port"] = int(condition["port"])
+        condition["process_num"] = int(condition.get("process_num", 1))
         print(condition)
-        while target:
-            target = target.replace(" ", "").replace("\n", "").split("-")
-            startip = ipaddress.ip_address(target[0])
-            if len(target) > 1:
-                finiship = ipaddress.ip_address(target[1])
-            else:
-                finiship = ipaddress.ip_address(target[0])
-            currentip = startip - 1
-            while currentip < finiship:
-                currentip = currentip + 1
-                with multiprocessing.Pool(1) as pool:
+        with closing(Pool(condition["process_num"])) as pool:
+            while target:
+                target = target.replace(" ", "").replace("\n", "").split("-")
+                startip = ipaddress.ip_address(target[0])
+                if len(target) > 1:
+                    finiship = ipaddress.ip_address(target[1])
+                else:
+                    finiship = ipaddress.ip_address(target[0])
+                currentip = startip - 1
+                while currentip < finiship:
+                    currentip = currentip + 1
+                    nowip = str(currentip)
                     process = pool.apply_async(
-                        check_host, [currentip, condition])
-                    try:
-                        result = process.get(timeout=2)
-                    except:
-                        print(str(currentip) + " Timeout")
-                        continue
-                    if result in ["Error", "Timeout"]:
-                        print(str(currentip) + " " + result)
-                    else:
-                        if result.find(
-                         condition["common_name_has"]) != -1:
-                            print(str(currentip) + " True, CN=" + result)
-                            with open(writefilepath, "a+") as writefile:
-                                writefile.write(str(currentip) + "\n")
-                        else:
-                            print(str(currentip) + " False, CN=" + result)
-
-            target = readfile.readline()
+                        check_host, [nowip, condition, writefilepath])
+                target = readfile.readline()
+            pool.close()
+            pool.join()
 
 if __name__ == "__main__":
+    start_time = time.time()
     main()
-    print("Finished!")
+    time_range = time.time() - start_time
+    print("Finished! Time Used: %.4fs!" % time_range)

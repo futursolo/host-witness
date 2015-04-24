@@ -7,6 +7,8 @@ DO NOT USE IT IF YOU DON'T KNOW WHAT YOU ARE DOING!!!
 
 SNI SSL is also supported!
 
+Multi Workers are also supported!
+
 Dependencies
 ------------
  - Python3.3+(Beacuse we need IP Address Library from Python3.3 to calculate IP Address Range)
