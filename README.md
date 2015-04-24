@@ -5,6 +5,7 @@ USE WITH YOUR OWN RISK!
 
 DO NOT USE IT IF YOU DON'T KNOW WHAT YOU ARE DOING!!!
 
+SNI SSL is also supported!
 
 Dependencies
 ------------

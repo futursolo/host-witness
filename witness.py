@@ -67,11 +67,7 @@ def check_host(currentip, condition):
             exit()
         except Exception as e:
             return "Error"
-    common_name = certname.commonName
-    if common_name.find(condition["common_name_has"]) != -1:
-        return "True"
-    else:
-        return "False"
+    return certname.commonName
 
 
 def main():
@@ -103,10 +99,17 @@ def main():
                         result = process.get(timeout=2)
                     except:
                         print(str(currentip) + " Timeout")
-                    print(str(currentip) + " " + result)
-                    if result == "True":
-                        with open(writefilepath, "a+") as writefile:
-                            writefile.write(str(currentip) + "\n")
+                        continue
+                    if result in ["Error", "Timeout"]:
+                        print(str(currentip) + " " + result)
+                    else:
+                        if result.find(
+                         condition["common_name_has"]) != -1:
+                            print(str(currentip) + " True, CN=" + result)
+                            with open(writefilepath, "a+") as writefile:
+                                writefile.write(str(currentip) + "\n")
+                        else:
+                            print(str(currentip) + " False, CN=" + result)
 
             target = readfile.readline()
 
