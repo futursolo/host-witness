@@ -33,7 +33,7 @@ python3 witness.py text.lst output.lst
 
 the test.lst example and output.lst example is included in the repository.
 
-Notice: host-witness will not clear output.lst first if there was anything include this file!!
+Notice: host-witness will not clear output.lst first if there was anything in this file!!
 
 
 License
